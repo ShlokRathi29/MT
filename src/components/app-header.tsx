@@ -4,6 +4,9 @@ export function AppHeader({ active }: { active: "Dashboard" | "Ledger" }) {
   const items = [
     { label: "Dashboard", href: "/" },
     { label: "Ledger", href: "/ledger" },
+    { label: "Accounts", href: "/accounts" },
+    { label: "Investments", href: "/investments" },
+    { label: "Lending & Borrowing", href: "/debts" },
   ] as const;
 
   return (
