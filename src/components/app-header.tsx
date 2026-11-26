@@ -7,6 +7,8 @@ export function AppHeader({ active }: { active: "Dashboard" | "Ledger" }) {
     { label: "Accounts", href: "/accounts" },
     { label: "Investments", href: "/investments" },
     { label: "Lending & Borrowing", href: "/debts" },
+    { label: "Diary", href: "/diary" },
+
   ] as const;
 
   return (
