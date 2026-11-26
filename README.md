@@ -104,6 +104,14 @@ Treat generated text and numbers as placeholders, not product rules. In particul
 │ diary, goals, categories     │
 │ Row Level Security policies │
 └──────────────────────────────┘
+                 │ wrapped per-user data keys only
+                 ▼
+┌─────────────────────────────────────┐
+│ External KMS / HSM                  │
+│ Holds wrapping key (KEK); unwrap is  │
+│ restricted to server identity, with  │
+│ audit logs and key rotation          │
+└─────────────────────────────────────┘
 
 GitHub ──> CI checks ──> staging deploy ──> production deploy
                               │                       │
@@ -118,6 +126,7 @@ GitHub ──> CI checks ──> staging deploy ──> production deploy
 4. PostgreSQL Row Level Security (RLS) independently restricts every query and mutation to the signed-in user's rows.
 5. Related money operations (for example, repayment + balance update + ledger entry) run in one database transaction so they cannot become partially applied.
 6. The server returns only the minimum needed data; logs never include passwords, OTPs, session tokens, or unnecessary financial details.
+7. For application-level encryption, the server fetches the signed-in user's encrypted rows, asks the KMS to unwrap that user's data-encryption key (DEK), decrypts only in server memory, performs calculations, then encrypts sensitive fields before writes. The browser never receives the DEK or KMS credentials.
 
 ### Core data model (initial)
 
@@ -187,6 +196,12 @@ Avoid putting feature rules in generic page components. Debt repayment behavior 
 ## Security and privacy requirements
 
 - Enforce HTTPS in hosted environments and secure cookie/session handling.
+- Rely on the database provider's AES-256 encryption at rest and TLS in transit as the baseline; add application-level encryption for sensitive user data as an additional layer, not as a replacement for authentication, RLS, or secure deployment.
+- Use **AES-256-GCM** (authenticated encryption), not an unspecified AES mode. Generate a unique random 96-bit nonce for each encryption with a key; store nonce, ciphertext, and authentication tag together. Use a cryptographic library/API and never implement cipher primitives ourselves.
+- Use envelope encryption: generate a random 256-bit per-user DEK; have an external KMS/HSM key-encryption key (KEK) wrap it. Store only the wrapped DEK and KMS key/version identifier with the user's database metadata. The raw DEK and KEK must never be stored in a second ordinary database or sent to the browser.
+- Restrict KMS unwrap permission to the server's workload identity, separate dev/staging/production keys, audit key usage, and plan key rotation and data re-encryption before launch. Password reset must not destroy or change the data key.
+- Keep database queries behind server-side feature services for encrypted fields. Aggregations and reports must decrypt authorized rows in server memory; encrypted text cannot be searched/indexed normally. Document the remaining visible metadata (such as record type, date, and user ownership) and the performance trade-off.
+- Delete the user's wrapped DEK as part of account deletion only after the deletion flow also removes the encrypted records according to retention policy; key deletion can make surviving ciphertext unrecoverable, so the process must be deliberate and auditable.
 - Store passwords and OTPs only through the auth provider; never store plaintext credentials.
 - Protect every database table with RLS and test cross-user access denial.
 - Keep the Supabase service-role key and email provider credentials on the server in environment secrets; never commit `.env` files.
@@ -268,6 +283,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=       # server only; do not expose to browser
 NEXT_PUBLIC_APP_URL=
 EMAIL_PROVIDER_API_KEY=          # if a separate transactional provider is selected
+KMS_KEY_ID=                      # server only; use workload identity where supported
+KMS_CREDENTIALS=                # server only; prefer managed identity, never commit credentials
 ```
 
 Use separate Supabase projects or isolated environments for local development, staging, and production. Never use production financial data as test fixtures.
